@@ -16,6 +16,7 @@ export type SummaryOcrSuggestion = {
 
 export type PlayerOcrSuggestion = {
   name: string;
+  position?: string;
   rating: string;
   goals: string;
   assists: string;
@@ -362,14 +363,36 @@ export function parsePlayersOcr(text: string): PlayerOcrSuggestion[] {
     .map((line) => {
       const compact = line.replace(/\s+/g, " ").trim();
       const match = compact.match(
-        /([a-zà-ÿ.'-]{2,}(?:\s+[a-zà-ÿ.'-]{2,}){0,2})\s+(\d[.,]\d)(?:\s+(\d+))?(?:\s+(\d+))?/i
+        /^(?:[a-z]{1,4}\s+)?([a-zà-ÿ.'-]{2,}(?:\s+[a-zà-ÿ.'-]{2,}){0,2})\s+(\d{1,2}(?:[.,]\d)?)\s+(\d+)\s+(\d+)$/i
       );
 
-      if (!match) {
+      if (match?.[1] && match?.[2] && match?.[3] && match?.[4]) {
+        const name = match[1]
+          .split(" ")
+          .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+          .join(" ")
+          .trim();
+
+        if (name.length < 3) {
+          return null;
+        }
+
+        return {
+          name,
+          rating: match[2].replace(",", "."),
+          goals: match[3],
+          assists: match[4]
+        };
+      }
+
+      const looseMatch = compact.match(
+        /([a-zà-ÿ.'-]{2,}(?:\s+[a-zà-ÿ.'-]{2,}){0,2})\s+(\d[.,]\d)(?:\s+(\d+))?(?:\s+(\d+))?/i
+      );
+      if (!looseMatch) {
         return null;
       }
 
-      const name = match[1]
+      const name = looseMatch[1]
         .split(" ")
         .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
         .join(" ")
@@ -381,9 +404,9 @@ export function parsePlayersOcr(text: string): PlayerOcrSuggestion[] {
 
       return {
         name,
-        rating: match[2].replace(",", "."),
-        goals: match[3] ?? "0",
-        assists: match[4] ?? "0"
+        rating: looseMatch[2].replace(",", "."),
+        goals: looseMatch[3] ?? "0",
+        assists: looseMatch[4] ?? "0"
       };
     })
     .filter((entry): entry is PlayerOcrSuggestion => entry !== null)

@@ -44,6 +44,191 @@ button {
   padding: 32px 20px 60px;
 }
 
+.mobile-app-shell {
+  max-width: 1120px;
+  padding: 20px 16px 96px;
+}
+
+.mobile-hero {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.mobile-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+}
+
+.icon-button {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  border: 1px solid rgba(171, 221, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f4f7fb;
+  font-size: 1.4rem;
+}
+
+.weekend-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(160, 220, 255, 0.16);
+  background:
+    radial-gradient(circle at right top, rgba(24, 198, 255, 0.15), transparent 35%),
+    rgba(8, 18, 32, 0.82);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.weekend-card-head {
+  display: grid;
+  gap: 16px;
+}
+
+.compact-card {
+  padding: 18px;
+  border-radius: 20px;
+}
+
+.hero-metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.squad-analytics-strip,
+.squad-aggregate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hero-metric {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(171, 221, 255, 0.08);
+}
+
+.hero-metric strong {
+  font-size: 1.15rem;
+}
+
+.top-tabs {
+  display: none;
+}
+
+.mobile-main {
+  display: grid;
+  gap: 18px;
+}
+
+.mobile-panel {
+  display: none;
+}
+
+.tab-visible {
+  display: grid;
+  gap: 18px;
+}
+
+.tab-hidden {
+  display: none;
+}
+
+.mobile-stats-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-list .match-card {
+  padding: 14px;
+}
+
+.stacked-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.accordion {
+  border-radius: 18px;
+  border: 1px solid rgba(171, 221, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.accordion summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px 18px;
+  font-weight: 700;
+  color: #f4f7fb;
+}
+
+.accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.accordion[open] summary {
+  border-bottom: 1px solid rgba(171, 221, 255, 0.08);
+}
+
+.accordion > .subpanel,
+.accordion > .stats-entry-grid {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.save-match-button {
+  width: 100%;
+  justify-self: stretch;
+  justify-content: center;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border-radius: 24px;
+  border: 1px solid rgba(171, 221, 255, 0.12);
+  background: rgba(7, 17, 31, 0.94);
+  backdrop-filter: blur(18px);
+  z-index: 20;
+}
+
+.bottom-nav-item {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  border: 0;
+  border-radius: 16px;
+  padding: 10px 6px;
+  background: transparent;
+  color: #98aac0;
+  font-size: 0.77rem;
+}
+
+.bottom-nav-item-active {
+  background: rgba(24, 198, 255, 0.12);
+  color: #f4f7fb;
+}
+
+.bottom-nav-icon {
+  font-size: 1rem;
+}
+
 .hero {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -147,6 +332,10 @@ h1 {
   gap: 18px;
 }
 
+.single-stat-grid {
+  grid-template-columns: 1fr;
+}
+
 .subpanel {
   display: grid;
   gap: 16px;
@@ -208,6 +397,70 @@ h1 {
 .side-selector {
   display: grid;
   gap: 10px;
+}
+
+.squad-header-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(171, 221, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.score-preview-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(171, 221, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.score-preview-card > div {
+  display: grid;
+  gap: 6px;
+}
+
+.squad-header-card > div {
+  display: grid;
+  gap: 6px;
+}
+
+.quick-player-table {
+  display: grid;
+  gap: 10px;
+}
+
+.quick-player-header,
+.quick-player-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) 72px 56px 56px;
+  gap: 10px;
+  align-items: center;
+}
+
+.quick-player-header {
+  color: #87d8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.quick-player-row {
+  padding: 12px 0;
+  border-top: 1px solid rgba(171, 221, 255, 0.08);
+}
+
+.quick-player-name {
+  display: grid;
+  gap: 4px;
+}
+
+.quick-player-name small {
+  color: #98aac0;
 }
 
 .segmented-control {
@@ -573,6 +826,10 @@ textarea:focus {
   color: #98aac0;
 }
 
+.squad-table {
+  margin-top: 8px;
+}
+
 @media (max-width: 980px) {
   .hero,
   .content-grid {
@@ -596,11 +853,46 @@ textarea:focus {
   }
 }
 
-@media (max-width: 640px) {
-  .app-shell {
-    padding: 20px 14px 40px;
+@media (min-width: 981px) {
+  .mobile-app-shell {
+    padding-bottom: 40px;
   }
 
+  .top-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .top-tab {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(171, 221, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: #aac1d6;
+    border-radius: 18px;
+    padding: 14px 16px;
+  }
+
+  .top-tab-active {
+    background: rgba(24, 198, 255, 0.12);
+    color: #f4f7fb;
+    border-color: rgba(24, 198, 255, 0.36);
+  }
+
+  .bottom-nav {
+    display: none;
+  }
+
+  .weekend-card-head {
+    grid-template-columns: 1fr 360px;
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
   .form-grid,
   .stats-grid,
   .mini-form-grid,
@@ -619,5 +911,14 @@ textarea:focus {
     border: 1px solid rgba(171, 221, 255, 0.08);
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.03);
+  }
+
+  .hero-metric-row,
+  .mobile-stats-grid,
+  .squad-header-card,
+  .squad-analytics-strip,
+  .squad-aggregate-grid,
+  .score-preview-card {
+    grid-template-columns: 1fr;
   }
 }

@@ -83,6 +83,32 @@ type CropForm = {
 };
 
 type TeamSide = "left" | "right";
+type MainTab = "przeglad" | "dodaj" | "historia" | "szczegoly" | "sklady";
+
+type SquadPlayer = {
+  id: string;
+  name: string;
+  position: string;
+  rating: number;
+};
+
+type SquadEntry = {
+  id: string;
+  name: string;
+  formation: string;
+  players: SquadPlayer[];
+  isDefault?: boolean;
+};
+
+type SquadPlayerAggregate = {
+  name: string;
+  position: string;
+  rating: number;
+  matches: number;
+  goals: number;
+  assists: number;
+  averageMatchRating: number;
+};
 
 type MatchEntry = {
   id: string;
@@ -90,6 +116,9 @@ type MatchEntry = {
   result: Result;
   goalsFor: number;
   goalsAgainst: number;
+  squadId?: string;
+  squadName: string;
+  squadFormation: string;
   opponentName: string;
   opponentFormation: string;
   opponentStyle: OpponentStyle;
@@ -106,6 +135,9 @@ type MatchForm = {
   result: Result;
   goalsFor: string;
   goalsAgainst: string;
+  squadId: string;
+  squadName: string;
+  squadFormation: string;
   opponentName: string;
   opponentFormation: string;
   opponentStyle: OpponentStyle;
@@ -114,14 +146,8 @@ type MatchForm = {
   notes: string;
 };
 
-type PlayerForm = {
-  name: string;
-  position: string;
-  rating: string;
-  stats: Record<PlayerStatKey, string>;
-};
-
 const STORAGE_KEY = "futstat.matches";
+const SQUADS_STORAGE_KEY = "futstat.squads";
 
 const teamStatFields: { key: TeamStatKey; label: string; step?: string }[] = [
   { key: "possession", label: "Posiadanie pilki %", step: "1" },
@@ -168,78 +194,6 @@ const opponentStyles: { value: OpponentStyle; label: string }[] = [
   { value: "possession", label: "Posiadanie" }
 ];
 
-const playerPresets = [
-  {
-    name: "Forlan",
-    position: "ST",
-    rating: "7.9",
-    stats: {
-      goals: "2",
-      assists: "0",
-      shots: "3",
-      shotAccuracy: "66",
-      passes: "21",
-      passAccuracy: "81",
-      dribbles: "6",
-      dribbleAccuracy: "50",
-      tackles: "0",
-      tackleAccuracy: "0",
-      offsides: "1",
-      fouls: "0",
-      possessionWon: "2",
-      possessionLost: "8",
-      distanceKm: "10.1",
-      sprints: "16"
-    }
-  },
-  {
-    name: "Raphinha",
-    position: "RW",
-    rating: "7.1",
-    stats: {
-      goals: "1",
-      assists: "0",
-      shots: "2",
-      shotAccuracy: "50",
-      passes: "18",
-      passAccuracy: "77",
-      dribbles: "9",
-      dribbleAccuracy: "66",
-      tackles: "1",
-      tackleAccuracy: "100",
-      offsides: "0",
-      fouls: "1",
-      possessionWon: "4",
-      possessionLost: "10",
-      distanceKm: "9.3",
-      sprints: "14"
-    }
-  },
-  {
-    name: "Gerrard",
-    position: "CM",
-    rating: "7.8",
-    stats: {
-      goals: "0",
-      assists: "1",
-      shots: "1",
-      shotAccuracy: "0",
-      passes: "34",
-      passAccuracy: "91",
-      dribbles: "3",
-      dribbleAccuracy: "66",
-      tackles: "4",
-      tackleAccuracy: "75",
-      offsides: "0",
-      fouls: "0",
-      possessionWon: "7",
-      possessionLost: "6",
-      distanceKm: "11.2",
-      sprints: "11"
-    }
-  }
-];
-
 function createNumericRecord<T extends string>(fields: readonly T[], value = "0") {
   return fields.reduce(
     (accumulator, field) => ({
@@ -260,7 +214,10 @@ const defaultForm = (): MatchForm => ({
   playedAt: new Date().toISOString().slice(0, 16),
   result: "win",
   goalsFor: "4",
-  goalsAgainst: "2",
+  goalsAgainst: "",
+  squadId: "",
+  squadName: "Moj sklad WL",
+  squadFormation: "4-2-3-1",
   opponentName: "Przeciwnik FUT Champions",
   opponentFormation: "4-2-3-1",
   opponentStyle: "balanced",
@@ -303,11 +260,15 @@ const defaultForm = (): MatchForm => ({
   notes: ""
 });
 
-const defaultPlayerForm = (): PlayerForm => ({
+const defaultSquadPlayerForm = () => ({
   name: "",
   position: "ST",
-  rating: "7.0",
-  stats: createDefaultPlayerStats()
+  rating: "82"
+});
+
+const defaultSquadForm = () => ({
+  name: "Moj sklad WL",
+  formation: "4-2-3-1"
 });
 
 const defaultSummaryScoreCrop = (): CropForm => ({
@@ -383,6 +344,55 @@ function formatOpponentStyle(style: OpponentStyle) {
   return opponentStyles.find((entry) => entry.value === style)?.label ?? style;
 }
 
+function normalizePlayerLookup(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s.-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function playerTokens(value: string) {
+  return normalizePlayerLookup(value)
+    .split(" ")
+    .map((token) => token.replace(/\./g, ""))
+    .filter(Boolean);
+}
+
+function isSamePlayerName(ocrName: string, squadName: string) {
+  const ocrTokens = playerTokens(ocrName);
+  const squadTokens = playerTokens(squadName);
+
+  if (ocrTokens.length === 0 || squadTokens.length === 0) {
+    return false;
+  }
+
+  const ocrJoined = ocrTokens.join(" ");
+  const squadJoined = squadTokens.join(" ");
+
+  if (ocrJoined === squadJoined || ocrJoined.includes(squadJoined) || squadJoined.includes(ocrJoined)) {
+    return true;
+  }
+
+  const ocrLast = ocrTokens[ocrTokens.length - 1];
+  const squadLast = squadTokens[squadTokens.length - 1];
+
+  if (ocrLast && squadLast && ocrLast === squadLast) {
+    const ocrFirst = ocrTokens[0];
+    const squadFirst = squadTokens[0];
+
+    if (!ocrFirst || !squadFirst) {
+      return true;
+    }
+
+    return ocrFirst === squadFirst || ocrFirst.charAt(0) === squadFirst.charAt(0);
+  }
+
+  return false;
+}
+
 function fileToDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -435,10 +445,47 @@ function CropInputs({
   );
 }
 
+function buildSquadAggregates(squad: SquadEntry, matches: MatchEntry[]): SquadPlayerAggregate[] {
+  const squadMatches = matches.filter((match) => match.squadId === squad.id);
+
+  return squad.players
+    .map((player) => {
+      const relatedEntries = squadMatches
+        .flatMap((match) => match.playerEntries)
+        .filter((entry) => entry.name.toLowerCase() === player.name.toLowerCase());
+
+      const matchesCount = relatedEntries.length;
+      const goals = relatedEntries.reduce((sum, entry) => sum + entry.stats.goals, 0);
+      const assists = relatedEntries.reduce((sum, entry) => sum + entry.stats.assists, 0);
+      const averageMatchRating =
+        matchesCount === 0
+          ? player.rating
+          : Number(
+              (
+                relatedEntries.reduce((sum, entry) => sum + entry.rating, 0) / matchesCount
+              ).toFixed(2)
+            );
+
+      return {
+        name: player.name,
+        position: player.position,
+        rating: player.rating,
+        matches: matchesCount,
+        goals,
+        assists,
+        averageMatchRating
+      };
+    })
+    .sort((a, b) => b.goals - a.goals || b.assists - a.assists || a.name.localeCompare(b.name));
+}
+
 function App() {
   const [matches, setMatches] = useState<MatchEntry[]>([]);
+  const [squads, setSquads] = useState<SquadEntry[]>([]);
   const [form, setForm] = useState<MatchForm>(defaultForm);
-  const [playerForm, setPlayerForm] = useState<PlayerForm>(defaultPlayerForm);
+  const [squadForm, setSquadForm] = useState(defaultSquadForm);
+  const [squadPlayerForm, setSquadPlayerForm] = useState(defaultSquadPlayerForm);
+  const [squadPlayersDraft, setSquadPlayersDraft] = useState<SquadPlayer[]>([]);
   const [players, setPlayers] = useState<PlayerEntry[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [summaryScreenshot, setSummaryScreenshot] = useState<ScreenshotAsset | null>(null);
@@ -458,11 +505,16 @@ function App() {
   const [playersCrop, setPlayersCrop] = useState<CropForm>(defaultPlayersCrop);
   const [myTeamSide, setMyTeamSide] = useState<TeamSide>("right");
   const [ocrApplyMessage, setOcrApplyMessage] = useState("");
+  const [activeTab, setActiveTab] = useState<MainTab>("przeglad");
+  const [matchesHydrated, setMatchesHydrated] = useState(false);
+  const [squadsHydrated, setSquadsHydrated] = useState(false);
+  const [editingSquadId, setEditingSquadId] = useState<string | null>(null);
 
   useEffect(() => {
     const raw = window.localStorage.getItem(STORAGE_KEY);
 
     if (!raw) {
+      setMatchesHydrated(true);
       return;
     }
 
@@ -474,15 +526,75 @@ function App() {
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      setMatchesHydrated(true);
     }
   }, []);
 
   useEffect(() => {
+    const raw = window.localStorage.getItem(SQUADS_STORAGE_KEY);
+
+    if (!raw) {
+      setSquadsHydrated(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as SquadEntry[];
+      setSquads(parsed);
+      if (parsed[0]) {
+        setForm((current) => ({
+          ...current,
+          squadId: parsed[0].id,
+          squadName: parsed[0].name,
+          squadFormation: parsed[0].formation
+        }));
+      }
+    } catch {
+      window.localStorage.removeItem(SQUADS_STORAGE_KEY);
+    } finally {
+      setSquadsHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!matchesHydrated) {
+      return;
+    }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
-  }, [matches]);
+  }, [matches, matchesHydrated]);
+
+  useEffect(() => {
+    if (!squadsHydrated) {
+      return;
+    }
+    window.localStorage.setItem(SQUADS_STORAGE_KEY, JSON.stringify(squads));
+  }, [squads, squadsHydrated]);
 
   const selectedMatch =
     matches.find((match) => match.id === selectedMatchId) ?? matches[0] ?? null;
+
+  const computedGoalsFor = useMemo(
+    () => players.reduce((sum, player) => sum + player.stats.goals, 0),
+    [players]
+  );
+
+  const computedResult: Result =
+    computedGoalsFor > parseNumber(form.goalsAgainst)
+      ? "win"
+      : computedGoalsFor < parseNumber(form.goalsAgainst)
+        ? "loss"
+        : "draw";
+
+  const squadAnalytics = useMemo(() => {
+    return squads.map((squad) => ({
+      squad,
+      players: buildSquadAggregates(squad, matches)
+    }));
+  }, [squads, matches]);
+
+  const selectedSquadAnalytics =
+    squadAnalytics.find((entry) => entry.squad.id === form.squadId) ?? squadAnalytics[0] ?? null;
 
   const stats = useMemo(() => {
     const total = matches.length;
@@ -632,40 +744,160 @@ function App() {
     };
   }, [matches, selectedMatch]);
 
-  const addPlayer = () => {
-    if (!playerForm.name.trim()) {
+  const addSquadPlayerToDraft = () => {
+    if (!squadPlayerForm.name.trim()) {
       return;
     }
 
-    const nextPlayer: PlayerEntry = {
-      id: crypto.randomUUID(),
-      name: playerForm.name.trim(),
-      position: playerForm.position.trim() || "UNK",
-      rating: parseNumber(playerForm.rating),
-      stats: toPlayerStats(playerForm.stats)
+    setSquadPlayersDraft((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        name: squadPlayerForm.name.trim(),
+        position: squadPlayerForm.position.trim() || "ST",
+        rating: parseNumber(squadPlayerForm.rating)
+      }
+    ]);
+
+    setSquadPlayerForm(defaultSquadPlayerForm());
+  };
+
+  const removeSquadDraftPlayer = (id: string) => {
+    setSquadPlayersDraft((current) => current.filter((player) => player.id !== id));
+  };
+
+  const startEditingSquad = (squad: SquadEntry) => {
+    setEditingSquadId(squad.id);
+    setSquadForm({
+      name: squad.name,
+      formation: squad.formation
+    });
+    setSquadPlayersDraft(
+      squad.players.map((player) => ({
+        ...player,
+        id: crypto.randomUUID()
+      }))
+    );
+    setSquadPlayerForm(defaultSquadPlayerForm());
+    setActiveTab("sklady");
+    setOcrApplyMessage(`Edytujesz sklad "${squad.name}".`);
+  };
+
+  const cancelSquadEditing = () => {
+    setEditingSquadId(null);
+    setSquadForm(defaultSquadForm());
+    setSquadPlayersDraft([]);
+    setSquadPlayerForm(defaultSquadPlayerForm());
+    setOcrApplyMessage("Anulowano edycje skladu.");
+  };
+
+  const saveSquad = () => {
+    if (!squadForm.name.trim()) {
+      return;
+    }
+
+    const normalizedName = squadForm.name.trim().toLowerCase();
+    const duplicate = squads.find(
+      (squad) => squad.name.trim().toLowerCase() === normalizedName && squad.id !== editingSquadId
+    );
+
+    if (duplicate) {
+      setOcrApplyMessage(`Sklad "${squadForm.name.trim()}" juz istnieje. Edytuj go zamiast dodawac drugi.`);
+      return;
+    }
+
+    const nextSquad: SquadEntry = {
+      id: editingSquadId ?? crypto.randomUUID(),
+      name: squadForm.name.trim(),
+      formation: squadForm.formation.trim() || "4-2-3-1",
+      players: squadPlayersDraft
     };
 
-    setPlayers((current) =>
-      [...current, nextPlayer].sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name))
+    setSquads((current) =>
+      editingSquadId
+        ? current.map((squad) => (squad.id === editingSquadId ? nextSquad : squad))
+        : [nextSquad, ...current]
     );
-    setPlayerForm(defaultPlayerForm());
+    setForm((current) => ({
+      ...current,
+      squadId: nextSquad.id,
+      squadName: nextSquad.name,
+      squadFormation: nextSquad.formation
+    }));
+    setEditingSquadId(null);
+    setSquadForm(defaultSquadForm());
+    setSquadPlayersDraft([]);
+    setSquadPlayerForm(defaultSquadPlayerForm());
+    setOcrApplyMessage(
+      editingSquadId
+        ? `Zmiany w skladzie "${nextSquad.name}" zostaly zapisane.`
+        : `Sklad "${nextSquad.name}" zostal zapisany i ustawiony do kolejnego meczu.`
+    );
   };
 
-  const applyPlayerPreset = () => {
-    const preset = playerPresets[players.length % playerPresets.length];
-    setPlayerForm({
-      name: preset.name,
-      position: preset.position,
-      rating: preset.rating,
-      stats: {
-        ...createDefaultPlayerStats(),
-        ...preset.stats
-      }
-    });
+  const deleteSquad = (id: string) => {
+    setSquads((current) => current.filter((squad) => squad.id !== id));
+    if (editingSquadId === id) {
+      setEditingSquadId(null);
+      setSquadForm(defaultSquadForm());
+      setSquadPlayersDraft([]);
+      setSquadPlayerForm(defaultSquadPlayerForm());
+    }
+    if (form.squadId === id) {
+      setForm((current) => ({
+        ...current,
+        squadId: "",
+        squadName: "",
+        squadFormation: ""
+      }));
+    }
   };
 
-  const removePendingPlayer = (id: string) => {
-    setPlayers((current) => current.filter((player) => player.id !== id));
+  const applySquadToMatch = (squad: SquadEntry) => {
+    setForm((current) => ({
+      ...current,
+      squadId: squad.id,
+      squadName: squad.name,
+      squadFormation: squad.formation
+    }));
+
+    setPlayers(
+      squad.players.map((player) => ({
+        id: crypto.randomUUID(),
+        name: player.name,
+        position: player.position,
+        rating: player.rating,
+        stats: toPlayerStats(createDefaultPlayerStats())
+      }))
+    );
+
+    setOcrApplyMessage(`Sklad "${squad.name}" zostal wczytany do meczu.`);
+  };
+
+  const copySquadFromLastMatch = () => {
+    const lastMatch = matches[0];
+
+    if (!lastMatch) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      squadName: lastMatch.squadName,
+      squadFormation: lastMatch.squadFormation
+    }));
+
+    setPlayers(
+      lastMatch.playerEntries.map((player) => ({
+        ...player,
+        id: crypto.randomUUID(),
+        stats: {
+          ...toPlayerStats(createDefaultPlayerStats())
+        }
+      }))
+    );
+
+    setOcrApplyMessage("Sklad z ostatniego meczu zostal skopiowany. Teraz dopisz statystyki po spotkaniu.");
   };
 
   const handleScreenshotUpload = async (
@@ -775,15 +1007,6 @@ function App() {
         next.teamStats[key as TeamStatKey] = myValue;
       }
 
-      for (const [key, value] of Object.entries(summaryResult.opponentStats)) {
-        const opponentValue = isMyTeamLeft ? value : summaryResult.teamStats[key] ?? value;
-        next.opponentStats[key as TeamStatKey] = opponentValue;
-      }
-
-      if (summaryResult.teams) {
-        next.opponentName = isMyTeamLeft ? summaryResult.teams.right : summaryResult.teams.left;
-      }
-
       return next;
     });
 
@@ -795,38 +1018,63 @@ function App() {
       return;
     }
 
-    const importedPlayers = playersOcr.result.map((player) => ({
-      id: crypto.randomUUID(),
-      name: player.name,
-      position: "UNK",
-      rating: parseNumber(player.rating),
-      stats: {
-        ...toPlayerStats(createDefaultPlayerStats()),
-        goals: parseNumber(player.goals),
-        assists: parseNumber(player.assists)
-      }
-    }));
+    let matchedCount = 0;
 
-    setPlayers((current) =>
-      [...current, ...importedPlayers].sort(
-        (a, b) => b.rating - a.rating || a.name.localeCompare(b.name)
-      )
+    setPlayers((current) => {
+      if (current.length === 0) {
+        return current;
+      }
+
+      return current.map((entry) => {
+        const matched = playersOcr.result?.find(
+          (player) => isSamePlayerName(player.name, entry.name)
+        );
+
+        if (!matched) {
+          return entry;
+        }
+
+        matchedCount += 1;
+
+        return {
+          ...entry,
+          rating: parseNumber(matched.rating),
+          stats: {
+            ...entry.stats,
+            goals: parseNumber(matched.goals),
+            assists: parseNumber(matched.assists)
+          }
+        };
+      });
+    });
+
+    setOcrApplyMessage(
+      matchedCount > 0
+        ? `OCR uzupelnil oceny, gole i asysty dla ${matchedCount} zawodnikow ze skladu.`
+        : "OCR odczytal tabele, ale nie dopasowal jeszcze nazwisk do skladu."
     );
-    setOcrApplyMessage("Wykryci zawodnicy zostali dodani do formularza.");
   };
 
   const addMatch = () => {
     const nextMatch: MatchEntry = {
       id: crypto.randomUUID(),
       playedAt: form.playedAt,
-      result: form.result,
-      goalsFor: parseNumber(form.goalsFor),
+      result:
+        computedGoalsFor > parseNumber(form.goalsAgainst)
+          ? "win"
+          : computedGoalsFor < parseNumber(form.goalsAgainst)
+            ? "loss"
+            : "draw",
+      goalsFor: computedGoalsFor,
       goalsAgainst: parseNumber(form.goalsAgainst),
+      squadId: form.squadId || undefined,
+      squadName: form.squadName.trim() || "Moj sklad WL",
+      squadFormation: form.squadFormation.trim() || "4-2-3-1",
       opponentName: form.opponentName.trim() || "Przeciwnik FUT Champions",
       opponentFormation: form.opponentFormation.trim(),
       opponentStyle: form.opponentStyle,
       teamStats: toTeamStats(form.teamStats),
-      opponentStats: toTeamStats(form.opponentStats),
+      opponentStats: toTeamStats(createDefaultTeamStats()),
       playerEntries: players,
       summaryScreenshot,
       playersScreenshot,
@@ -841,9 +1089,22 @@ function App() {
       return nextMatches;
     });
 
-    setForm(defaultForm());
+    setForm(() => {
+      const nextDefault = defaultForm();
+      const selectedSquad = squads.find((squad) => squad.id === form.squadId) ?? squads[0];
+
+      if (!selectedSquad) {
+        return nextDefault;
+      }
+
+      return {
+        ...nextDefault,
+        squadId: selectedSquad.id,
+        squadName: selectedSquad.name,
+        squadFormation: selectedSquad.formation
+      };
+    });
     setPlayers([]);
-    setPlayerForm(defaultPlayerForm());
     setSummaryScreenshot(null);
     setPlayersScreenshot(null);
     setSummaryOcr({ status: "idle", result: null, error: null });
@@ -858,25 +1119,197 @@ function App() {
     }
   };
 
+  const navItems: { id: MainTab; label: string; icon: string }[] = [
+    { id: "przeglad", label: "Weekend", icon: "▦" },
+    { id: "dodaj", label: "Dodaj", icon: "+" },
+    { id: "historia", label: "Mecze", icon: "≣" },
+    { id: "szczegoly", label: "Szczegoly", icon: "◎" },
+    { id: "sklady", label: "Sklady", icon: "◫" }
+  ];
+
   return (
-    <div className="app-shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Tracker FUT Champions</p>
-          <h1>FutStat</h1>
-          <p className="hero-copy">
-            Zapisuj pelne statystyki meczu i zawodnikow, dodawaj screeny po spotkaniu
-            i buduj archiwum gotowe pod kolejny krok: automatyczne odczytywanie danych.
-          </p>
+    <div className="app-shell mobile-app-shell">
+      <header className="mobile-hero">
+        <div className="mobile-topbar">
+          <div>
+            <p className="eyebrow">Current Weekend League</p>
+            <h1>FutStat</h1>
+          </div>
+          <button className="icon-button" type="button" onClick={() => setActiveTab("dodaj")}>
+            +
+          </button>
         </div>
-        <div className="hero-card">
-          <span className="hero-label">Sugestia sesji</span>
-          <strong>{stats.recommendation}</strong>
-        </div>
+
+        <section className="weekend-card">
+          <div className="weekend-card-head">
+            <div>
+              <p className="panel-kicker">Aktualny bilans</p>
+              <h2>
+                {stats.wins}-{stats.losses}
+              </h2>
+              <p className="panel-subtle">{stats.draws > 0 ? `${stats.draws} remis(y)` : "Weekend w toku"}</p>
+            </div>
+            <div className="hero-card compact-card">
+              <span className="hero-label">Sugestia</span>
+              <strong>{stats.recommendation}</strong>
+            </div>
+          </div>
+
+          <div className="hero-metric-row">
+            <article className="hero-metric">
+              <span className="stat-label">Mecze</span>
+              <strong>{stats.total}</strong>
+            </article>
+            <article className="hero-metric">
+              <span className="stat-label">Bramki</span>
+              <strong>
+                {matches.reduce((sum, match) => sum + match.goalsFor, 0)}-
+                {matches.reduce((sum, match) => sum + match.goalsAgainst, 0)}
+              </strong>
+            </article>
+            <article className="hero-metric">
+              <span className="stat-label">Top scorer</span>
+              <strong>{stats.topScorer}</strong>
+            </article>
+          </div>
+
+          {selectedSquadAnalytics ? (
+            <div className="squad-analytics-strip">
+              <article className="hero-metric">
+                <span className="stat-label">Aktywny sklad</span>
+                <strong>{selectedSquadAnalytics.squad.name}</strong>
+              </article>
+              <article className="hero-metric">
+                <span className="stat-label">Lider goli</span>
+                <strong>
+                  {selectedSquadAnalytics.players[0]
+                    ? `${selectedSquadAnalytics.players[0].name} (${selectedSquadAnalytics.players[0].goals})`
+                    : "Brak danych"}
+                </strong>
+              </article>
+              <article className="hero-metric">
+                <span className="stat-label">Lider asyst</span>
+                <strong>
+                  {[...selectedSquadAnalytics.players]
+                    .sort((a, b) => b.assists - a.assists || a.name.localeCompare(b.name))[0]
+                    ? `${[...selectedSquadAnalytics.players].sort(
+                        (a, b) => b.assists - a.assists || a.name.localeCompare(b.name)
+                      )[0].name} (${
+                        [...selectedSquadAnalytics.players].sort(
+                          (a, b) => b.assists - a.assists || a.name.localeCompare(b.name)
+                        )[0].assists
+                      })`
+                    : "Brak danych"}
+                </strong>
+              </article>
+            </div>
+          ) : null}
+        </section>
+
+        <nav className="top-tabs">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              className={`top-tab ${activeTab === item.id ? "top-tab-active" : ""}`}
+              type="button"
+              onClick={() => setActiveTab(item.id)}
+            >
+              <span>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
       </header>
 
-      <main className="content-grid">
-        <section className="panel form-panel">
+      <main className="mobile-main">
+        <section className={`mobile-panel ${activeTab === "przeglad" ? "tab-visible" : "tab-hidden"}`}>
+          <div className="panel-heading">
+            <div>
+              <p className="panel-kicker">Przeglad</p>
+              <h2>Weekend w liczbach</h2>
+            </div>
+            <button className="ghost-button" type="button" onClick={() => setActiveTab("dodaj")}>
+              Dodaj mecz
+            </button>
+          </div>
+
+          <section className="stats-grid mobile-stats-grid">
+            <article className="panel stat-card">
+              <span className="stat-label">Seria</span>
+              <strong>{stats.currentStreak.label}</strong>
+              <span className="stat-meta">{stats.winRate}% wygranych</span>
+            </article>
+
+            <article className="panel stat-card">
+              <span className="stat-label">Najlepsza godzina</span>
+              <strong>{stats.bestHour}</strong>
+              <span className="stat-meta">Kiedy grasz najlepiej</span>
+            </article>
+
+            <article className="panel stat-card">
+              <span className="stat-label">Najtrudniejszy styl</span>
+              <strong>{stats.worstMatchup}</strong>
+              <span className="stat-meta">Aktualnie najgorszy matchup</span>
+            </article>
+
+            <article className="panel stat-card">
+              <span className="stat-label">Srednia ocena</span>
+              <strong>{stats.averagePlayerRating || "-"}</strong>
+              <span className="stat-meta">Ze wszystkich kart meczowych</span>
+            </article>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="panel-kicker">Ostatnie mecze</p>
+                <h2>Szybki podglad</h2>
+              </div>
+              <button className="ghost-button" type="button" onClick={() => setActiveTab("historia")}>
+                Zobacz wszystkie
+              </button>
+            </div>
+
+            {matches.length === 0 ? (
+              <div className="empty-state">
+                <strong>Weekend jeszcze pusty.</strong>
+                <p>Dodaj pierwszy mecz i zacznij budowac swoje statystyki FUT Champions.</p>
+              </div>
+            ) : (
+              <div className="match-list compact-list">
+                {matches.slice(0, 4).map((match) => (
+                  <article key={match.id} className="match-card">
+                    <div>
+                      <span
+                        className={`result-pill ${
+                          match.result === "win"
+                            ? "result-win"
+                            : match.result === "loss"
+                              ? "result-loss"
+                              : "result-draw"
+                        }`}
+                      >
+                        {formatResult(match.result)}
+                      </span>
+                      <strong>
+                        {match.goalsFor}:{match.goalsAgainst}
+                      </strong>
+                    </div>
+
+                    <div className="match-meta">
+                      <span>{match.squadName}</span>
+                      <span>{match.squadFormation}</span>
+                      <span>{new Date(match.playedAt).toLocaleString("pl-PL")}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </section>
+
+        <section className={`mobile-panel ${activeTab === "dodaj" ? "tab-visible" : "tab-hidden"}`}>
+          <section className="panel form-panel">
           <div className="panel-heading">
             <div>
               <p className="panel-kicker">Dodaj mecz</p>
@@ -898,35 +1331,6 @@ function App() {
             </label>
 
             <label>
-              Wynik meczu
-              <select
-                value={form.result}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    result: event.target.value as Result
-                  }))
-                }
-              >
-                <option value="win">Wygrana</option>
-                <option value="draw">Remis</option>
-                <option value="loss">Porazka</option>
-              </select>
-            </label>
-
-            <label>
-              Gole moje
-              <input
-                type="number"
-                min="0"
-                value={form.goalsFor}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, goalsFor: event.target.value }))
-                }
-              />
-            </label>
-
-            <label>
               Gole przeciwnika
               <input
                 type="number"
@@ -942,55 +1346,205 @@ function App() {
             </label>
 
             <label>
-              Nazwa przeciwnika
+              Nazwa skladu
               <input
                 type="text"
-                value={form.opponentName}
+                value={form.squadName}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    opponentName: event.target.value
+                    squadName: event.target.value
                   }))
                 }
               />
             </label>
 
             <label>
-              Formacja przeciwnika
+              Formacja skladu
               <input
                 type="text"
-                value={form.opponentFormation}
+                value={form.squadFormation}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    opponentFormation: event.target.value
+                    squadFormation: event.target.value
                   }))
                 }
               />
             </label>
 
             <label className="full-width">
-              Styl przeciwnika
+              Wybierz zapisany sklad
               <select
-                value={form.opponentStyle}
-                onChange={(event) =>
+                value={form.squadId}
+                onChange={(event) => {
+                  const squad = squads.find((entry) => entry.id === event.target.value);
                   setForm((current) => ({
                     ...current,
-                    opponentStyle: event.target.value as OpponentStyle
-                  }))
-                }
+                    squadId: event.target.value,
+                    squadName: squad?.name ?? current.squadName,
+                    squadFormation: squad?.formation ?? current.squadFormation
+                  }));
+                }}
               >
-                {opponentStyles.map((style) => (
-                  <option key={style.value} value={style.value}>
-                    {style.label}
+                <option value="">Brak wybranego skladu</option>
+                {squads.map((squad) => (
+                  <option key={squad.id} value={squad.id}>
+                    {squad.name} | {squad.formation} | {squad.players.length} zawodnikow
                   </option>
                 ))}
               </select>
             </label>
+
+            <div className="button-row full-width">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  const squad = squads.find((entry) => entry.id === form.squadId);
+                  if (squad) {
+                    applySquadToMatch(squad);
+                  }
+                }}
+                disabled={!form.squadId}
+              >
+                Wczytaj sklad do meczu
+              </button>
+              <button className="ghost-button" type="button" onClick={() => setActiveTab("sklady")}>
+                Zarzadzaj skladami
+              </button>
+            </div>
+
+            <div className="full-width score-preview-card">
+              <div>
+                <span className="stat-label">Wynik z zawodnikow</span>
+                <strong>
+                  {computedGoalsFor}:{parseNumber(form.goalsAgainst)}
+                </strong>
+              </div>
+              <div>
+                <span className="stat-label">Rezultat</span>
+                <strong>{formatResult(computedResult)}</strong>
+              </div>
+            </div>
           </div>
 
-          <div className="stats-entry-grid">
-            <section className="subpanel">
+          <div className="stacked-sections">
+            <details className="accordion" open>
+              <summary>Sklad i statystyki zawodnikow</summary>
+              <section className="subpanel">
+                <div className="subpanel-header">
+                  <div>
+                    <p className="panel-kicker">Sklad meczowy</p>
+                    <h3>Zawodnicy i ich statystyki</h3>
+                  </div>
+                  <div className="button-row">
+                    <button className="ghost-button" type="button" onClick={copySquadFromLastMatch}>
+                      Kopiuj ostatni sklad
+                    </button>
+                  </div>
+                </div>
+
+                <div className="squad-header-card">
+                  <div>
+                    <span className="stat-label">Sklad</span>
+                    <strong>{form.squadName || "Moj sklad WL"}</strong>
+                  </div>
+                  <div>
+                    <span className="stat-label">Formacja</span>
+                    <strong>{form.squadFormation || "4-2-3-1"}</strong>
+                  </div>
+                  <div>
+                    <span className="stat-label">Zawodnicy</span>
+                    <strong>{players.length}</strong>
+                  </div>
+                </div>
+
+                <div className="quick-player-table">
+                  <div className="quick-player-header">
+                    <span>Zawodnik</span>
+                    <span>Ocena</span>
+                    <span>G</span>
+                    <span>A</span>
+                  </div>
+
+                  {players.length > 0 ? (
+                    players.map((player) => (
+                      <div key={player.id} className="quick-player-row">
+                        <div className="quick-player-name">
+                          <strong>{player.name}</strong>
+                          <small>{player.position}</small>
+                        </div>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={player.rating}
+                          onChange={(event) =>
+                            setPlayers((current) =>
+                              current.map((entry) =>
+                                entry.id === player.id
+                                  ? { ...entry, rating: parseNumber(event.target.value) }
+                                  : entry
+                              )
+                            )
+                          }
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          value={player.stats.goals}
+                          onChange={(event) =>
+                            setPlayers((current) =>
+                              current.map((entry) =>
+                                entry.id === player.id
+                                  ? {
+                                      ...entry,
+                                      stats: {
+                                        ...entry.stats,
+                                        goals: parseNumber(event.target.value)
+                                      }
+                                    }
+                                  : entry
+                              )
+                            )
+                          }
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          value={player.stats.assists}
+                          onChange={(event) =>
+                            setPlayers((current) =>
+                              current.map((entry) =>
+                                entry.id === player.id
+                                  ? {
+                                      ...entry,
+                                      stats: {
+                                        ...entry.stats,
+                                        assists: parseNumber(event.target.value)
+                                      }
+                                    }
+                                  : entry
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-state compact">
+                      <strong>Wczytaj sklad do meczu.</strong>
+                      <p>Po wyborze skladu zobaczysz tu szybka liste zawodnikow do rozliczenia meczu.</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </details>
+
+            <details className="accordion" open>
+              <summary>Statystyki mojej druzyny</summary>
+              <div className="stats-entry-grid single-stat-grid">
+                <section className="subpanel">
               <div className="subpanel-header">
                 <div>
                   <p className="panel-kicker">Moja druzyna</p>
@@ -1021,41 +1575,12 @@ function App() {
                 ))}
               </div>
             </section>
-
-            <section className="subpanel">
-              <div className="subpanel-header">
-                <div>
-                  <p className="panel-kicker">Przeciwnik</p>
-                  <h3>Statystyki meczu</h3>
-                </div>
-                <span className="panel-subtle">Te same pola po drugiej stronie</span>
               </div>
+            </details>
 
-              <div className="mini-form-grid">
-                {teamStatFields.map((field) => (
-                  <label key={`opponent-${field.key}`}>
-                    {field.label}
-                    <input
-                      type="number"
-                      step={field.step ?? "1"}
-                      value={form.opponentStats[field.key]}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          opponentStats: {
-                            ...current.opponentStats,
-                            [field.key]: event.target.value
-                          }
-                        }))
-                      }
-                    />
-                  </label>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <section className="subpanel">
+            <details className="accordion" open>
+              <summary>OCR i screeny</summary>
+              <section className="subpanel">
             <div className="subpanel-header">
               <div>
                 <p className="panel-kicker">Upload</p>
@@ -1229,9 +1754,10 @@ function App() {
                 ) : null}
               </div>
             </div>
-          </section>
+              </section>
+            </details>
 
-          <label className="full-width">
+            <label className="full-width">
             Notatki
             <textarea
               rows={3}
@@ -1243,170 +1769,16 @@ function App() {
             />
           </label>
 
-          <section className="subpanel">
-            <div className="subpanel-header">
-              <div>
-                <p className="panel-kicker">Moi zawodnicy</p>
-                <h3>Statystyki zawodnikow</h3>
-              </div>
-              <button className="ghost-button" type="button" onClick={applyPlayerPreset}>
-                Wczytaj przyklad
-              </button>
-            </div>
+          </div>
 
-            <div className="player-form-grid">
-              <label>
-                Nazwa zawodnika
-                <input
-                  type="text"
-                  value={playerForm.name}
-                  onChange={(event) =>
-                    setPlayerForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </label>
-
-              <label>
-                Pozycja
-                <input
-                  type="text"
-                  value={playerForm.position}
-                  onChange={(event) =>
-                    setPlayerForm((current) => ({
-                      ...current,
-                      position: event.target.value
-                    }))
-                  }
-                />
-              </label>
-
-              <label>
-                Ocena
-                <input
-                  type="number"
-                  step="0.1"
-                  value={playerForm.rating}
-                  onChange={(event) =>
-                    setPlayerForm((current) => ({ ...current, rating: event.target.value }))
-                  }
-                />
-              </label>
-            </div>
-
-            <div className="mini-form-grid">
-              {playerStatFields.map((field) => (
-                <label key={`player-${field.key}`}>
-                  {field.label}
-                  <input
-                    type="number"
-                    step={field.step ?? "1"}
-                    value={playerForm.stats[field.key]}
-                    onChange={(event) =>
-                      setPlayerForm((current) => ({
-                        ...current,
-                        stats: {
-                          ...current.stats,
-                          [field.key]: event.target.value
-                        }
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="button-row">
-              <button className="primary-button" type="button" onClick={addPlayer}>
-                Dodaj zawodnika
-              </button>
-              <span className="panel-subtle">{players.length} zawodnikow gotowych do zapisu</span>
-            </div>
-
-            {players.length > 0 ? (
-              <div className="player-chip-grid">
-                {players.map((player) => (
-                  <article key={player.id} className="player-chip">
-                    <div>
-                      <strong>{player.name}</strong>
-                      <span>
-                        {player.position} | {player.rating.toFixed(1)}
-                      </span>
-                    </div>
-                    <div className="player-chip-meta">
-                      <span>{player.stats.goals} G</span>
-                      <span>{player.stats.assists} A</span>
-                      <span>{player.stats.passes} P</span>
-                    </div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => removePendingPlayer(player.id)}
-                    >
-                      Usun
-                    </button>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state compact">
-                <strong>Nie dodano jeszcze zawodnikow.</strong>
-                <p>Na start wpisuj kluczowych graczy po kazdym meczu, a potem rozszerzymy to na caly sklad.</p>
-              </div>
-            )}
-          </section>
-
-          <button className="primary-button" type="button" onClick={addMatch}>
+          <button className="primary-button save-match-button" type="button" onClick={addMatch}>
             Zapisz pelny mecz
           </button>
+          </section>
         </section>
 
-        <section className="stats-grid">
-          <article className="panel stat-card">
-            <span className="stat-label">Bilans</span>
-            <strong>
-              {stats.wins}-{stats.draws}-{stats.losses}
-            </strong>
-            <span className="stat-meta">{stats.winRate}% wygranych</span>
-          </article>
-
-          <article className="panel stat-card">
-            <span className="stat-label">Aktualna seria</span>
-            <strong>{stats.currentStreak.label}</strong>
-            <span className="stat-meta">{stats.total} zapisanych meczow</span>
-          </article>
-
-          <article className="panel stat-card">
-            <span className="stat-label">Najlepsza godzina</span>
-            <strong>{stats.bestHour}</strong>
-            <span className="stat-meta">Kiedy wyniki sa najmocniejsze</span>
-          </article>
-
-          <article className="panel stat-card">
-            <span className="stat-label">Najtrudniejszy matchup</span>
-            <strong>{stats.worstMatchup}</strong>
-            <span className="stat-meta">Styl, ktory aktualnie najbardziej boli</span>
-          </article>
-
-          <article className="panel stat-card">
-            <span className="stat-label">Srednia ocena</span>
-            <strong>{stats.averagePlayerRating || "-"}</strong>
-            <span className="stat-meta">Ze wszystkich zapisanych kart zawodnikow</span>
-          </article>
-
-          <article className="panel stat-card">
-            <span className="stat-label">Najlepszy strzelec</span>
-            <strong>{stats.topScorer}</strong>
-            <span className="stat-meta">Lider goli do tej pory</span>
-          </article>
-
-          <article className="panel stat-card wide">
-            <span className="stat-label">Bilans bramkowy</span>
-            <strong>{stats.goalDiff >= 0 ? `+${stats.goalDiff}` : stats.goalDiff}</strong>
-            <span className="stat-meta">Prosty wskaznik formy weekendowej</span>
-          </article>
-        </section>
-
-        <section className="panel details-panel">
+        <section className={`mobile-panel ${activeTab === "szczegoly" ? "tab-visible" : "tab-hidden"}`}>
+          <section className="panel details-panel">
           <div className="panel-heading">
             <div>
               <p className="panel-kicker">Szczegoly meczu</p>
@@ -1444,9 +1816,9 @@ function App() {
                   </strong>
                 </div>
                 <div className="match-meta">
-                  <span>{selectedMatch.opponentName}</span>
-                  <span>{selectedMatch.opponentFormation}</span>
-                  <span>{formatOpponentStyle(selectedMatch.opponentStyle)}</span>
+                  <span>{selectedMatch.squadName}</span>
+                  <span>{selectedMatch.squadFormation}</span>
+                  <span>Stracone gole: {selectedMatch.goalsAgainst}</span>
                   <span>{new Date(selectedMatch.playedAt).toLocaleString("pl-PL")}</span>
                 </div>
                 {selectedMatch.notes ? (
@@ -1488,7 +1860,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="comparison-grid">
+              <div className="comparison-grid single-stat-grid">
                 <section className="subpanel">
                   <div className="subpanel-header">
                     <div>
@@ -1501,23 +1873,6 @@ function App() {
                       <div key={`team-view-${field.key}`} className="stat-row">
                         <span>{field.label}</span>
                         <strong>{selectedMatch.teamStats[field.key]}</strong>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="subpanel">
-                  <div className="subpanel-header">
-                    <div>
-                      <p className="panel-kicker">Przeciwnik</p>
-                      <h3>Zapisane statystyki</h3>
-                    </div>
-                  </div>
-                  <div className="stat-list">
-                    {teamStatFields.map((field) => (
-                      <div key={`opponent-view-${field.key}`} className="stat-row">
-                        <span>{field.label}</span>
-                        <strong>{selectedMatch.opponentStats[field.key]}</strong>
                       </div>
                     ))}
                   </div>
@@ -1564,9 +1919,11 @@ function App() {
               </section>
             </div>
           )}
+          </section>
         </section>
 
-        <section className="panel history-panel">
+        <section className={`mobile-panel ${activeTab === "historia" ? "tab-visible" : "tab-hidden"}`}>
+          <section className="panel history-panel">
           <div className="panel-heading">
             <div>
               <p className="panel-kicker">Archiwum</p>
@@ -1605,9 +1962,9 @@ function App() {
                   </div>
 
                   <div className="match-meta">
-                    <span>{match.opponentName}</span>
-                    <span>{match.opponentFormation}</span>
-                    <span>{formatOpponentStyle(match.opponentStyle)}</span>
+                    <span>{match.squadName}</span>
+                    <span>{match.squadFormation}</span>
+                    <span>Stracone: {match.goalsAgainst}</span>
                     <span>{match.playerEntries.length} zawodnikow</span>
                     <span>{new Date(match.playedAt).toLocaleString("pl-PL")}</span>
                   </div>
@@ -1618,7 +1975,10 @@ function App() {
                     <button
                       className="ghost-button"
                       type="button"
-                      onClick={() => setSelectedMatchId(match.id)}
+                      onClick={() => {
+                        setSelectedMatchId(match.id);
+                        setActiveTab("szczegoly");
+                      }}
                     >
                       Zobacz szczegoly
                     </button>
@@ -1634,8 +1994,292 @@ function App() {
               ))}
             </div>
           )}
+          </section>
+        </section>
+
+        <section className={`mobile-panel ${activeTab === "sklady" ? "tab-visible" : "tab-hidden"}`}>
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="panel-kicker">Sklady</p>
+                <h2>Baza twoich skladow</h2>
+              </div>
+              <button className="ghost-button" type="button" onClick={() => setActiveTab("dodaj")}>
+                Wroc do meczu
+              </button>
+            </div>
+
+            <div className="stacked-sections">
+              <section className="subpanel">
+                <div className="subpanel-header">
+                  <div>
+                    <p className="panel-kicker">Nowy sklad</p>
+                    <h3>
+                      {editingSquadId ? "Edytuj zapisany sklad" : "Zbuduj sklad niezaleznie od meczu"}
+                    </h3>
+                  </div>
+                  {editingSquadId ? (
+                    <span className="panel-subtle">Tryb edycji aktywny</span>
+                  ) : null}
+                </div>
+
+                <div className="form-grid">
+                  <label>
+                    Nazwa skladu
+                    <input
+                      type="text"
+                      value={squadForm.name}
+                      onChange={(event) =>
+                        setSquadForm((current) => ({ ...current, name: event.target.value }))
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Formacja
+                    <input
+                      type="text"
+                      value={squadForm.formation}
+                      onChange={(event) =>
+                        setSquadForm((current) => ({
+                          ...current,
+                          formation: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="player-form-grid">
+                  <label>
+                    Nazwa zawodnika
+                    <input
+                      type="text"
+                      value={squadPlayerForm.name}
+                      onChange={(event) =>
+                        setSquadPlayerForm((current) => ({
+                          ...current,
+                          name: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Pozycja
+                    <input
+                      type="text"
+                      value={squadPlayerForm.position}
+                      onChange={(event) =>
+                        setSquadPlayerForm((current) => ({
+                          ...current,
+                          position: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Ocena
+                    <input
+                      type="number"
+                      value={squadPlayerForm.rating}
+                      onChange={(event) =>
+                        setSquadPlayerForm((current) => ({
+                          ...current,
+                          rating: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="button-row">
+                  <button className="ghost-button" type="button" onClick={addSquadPlayerToDraft}>
+                    Dodaj do skladu
+                  </button>
+                  <button className="primary-button" type="button" onClick={saveSquad}>
+                    {editingSquadId ? "Zapisz zmiany" : "Zapisz sklad"}
+                  </button>
+                  {editingSquadId ? (
+                    <button className="ghost-button" type="button" onClick={cancelSquadEditing}>
+                      Anuluj edycje
+                    </button>
+                  ) : null}
+                </div>
+
+                {squadPlayersDraft.length > 0 ? (
+                  <div className="player-chip-grid">
+                    {squadPlayersDraft.map((player) => (
+                      <article key={player.id} className="player-chip">
+                        <div>
+                          <strong>{player.name}</strong>
+                          <span>
+                            {player.position} | {player.rating}
+                          </span>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => removeSquadDraftPlayer(player.id)}
+                        >
+                          Usun
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state compact">
+                    <strong>Brak zawodnikow w roboczym skladzie.</strong>
+                    <p>Dodaj zawodnikow, zapisz sklad i potem wybierz go przy meczu.</p>
+                  </div>
+                )}
+              </section>
+
+              <section className="subpanel">
+                <div className="subpanel-header">
+                  <div>
+                    <p className="panel-kicker">Zapisane sklady</p>
+                    <h3>{squads.length} gotowych skladow</h3>
+                  </div>
+                </div>
+
+                {squads.length === 0 ? (
+                  <div className="empty-state compact">
+                    <strong>Nie masz jeszcze zadnego skladu.</strong>
+                    <p>Stworz pierwszy sklad, a potem wybieraj go przy dodawaniu meczu.</p>
+                  </div>
+                ) : (
+                  <div className="match-list">
+                    {squadAnalytics.map(({ squad, players: aggregates }) => (
+                      <article key={squad.id} className="match-card">
+                        <div>
+                          <strong>{squad.name}</strong>
+                        </div>
+                        <div className="match-meta">
+                          <span>{squad.formation}</span>
+                          <span>{squad.players.length} zawodnikow</span>
+                          <span>{matches.filter((match) => match.squadId === squad.id).length} meczow</span>
+                        </div>
+
+                        {aggregates.length > 0 ? (
+                          <div className="squad-aggregate-grid">
+                            <article className="player-chip">
+                              <div>
+                                <strong>Top scorer</strong>
+                                <span>
+                                  {aggregates[0].name} | {aggregates[0].goals} goli
+                                </span>
+                              </div>
+                            </article>
+                            <article className="player-chip">
+                              <div>
+                                <strong>Top assists</strong>
+                                <span>
+                                  {[...aggregates].sort(
+                                    (a, b) => b.assists - a.assists || a.name.localeCompare(b.name)
+                                  )[0].name}{" "}
+                                  |{" "}
+                                  {[...aggregates].sort(
+                                    (a, b) => b.assists - a.assists || a.name.localeCompare(b.name)
+                                  )[0].assists}{" "}
+                                  asyst
+                                </span>
+                              </div>
+                            </article>
+                            <article className="player-chip">
+                              <div>
+                                <strong>Najlepsza srednia</strong>
+                                <span>
+                                  {[...aggregates].sort(
+                                    (a, b) =>
+                                      b.averageMatchRating - a.averageMatchRating ||
+                                      a.name.localeCompare(b.name)
+                                  )[0].name}{" "}
+                                  |{" "}
+                                  {[...aggregates].sort(
+                                    (a, b) =>
+                                      b.averageMatchRating - a.averageMatchRating ||
+                                      a.name.localeCompare(b.name)
+                                  )[0].averageMatchRating}
+                                </span>
+                              </div>
+                            </article>
+                          </div>
+                        ) : null}
+
+                        <div className="player-table squad-table">
+                          <div className="player-table-header">
+                            <span>Zawodnik</span>
+                            <span>Wystepy</span>
+                            <span>Bramki</span>
+                            <span>Asysty</span>
+                            <span>Srednia</span>
+                            <span>Ocena bazowa</span>
+                          </div>
+                          {aggregates.map((player) => (
+                            <div key={`${squad.id}-${player.name}`} className="player-table-row">
+                              <span>
+                                {player.name} <small>{player.position}</small>
+                              </span>
+                              <span>{player.matches}</span>
+                              <span>{player.goals}</span>
+                              <span>{player.assists}</span>
+                              <span>{player.averageMatchRating}</span>
+                              <span>{player.rating}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="button-row">
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => startEditingSquad(squad)}
+                          >
+                            Edytuj sklad
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => {
+                              applySquadToMatch(squad);
+                              setActiveTab("dodaj");
+                            }}
+                          >
+                            Uzyj w meczu
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => deleteSquad(squad.id)}
+                          >
+                            Usun sklad
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </section>
         </section>
       </main>
+
+      <nav className="bottom-nav">
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            className={`bottom-nav-item ${activeTab === item.id ? "bottom-nav-item-active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab(item.id)}
+          >
+            <span className="bottom-nav-icon">{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
