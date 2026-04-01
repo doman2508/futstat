@@ -82,6 +82,8 @@ type CropForm = {
   height: string;
 };
 
+type TeamSide = "left" | "right";
+
 type MatchEntry = {
   id: string;
   playedAt: string;
@@ -454,6 +456,8 @@ function App() {
   const [summaryScoreCrop, setSummaryScoreCrop] = useState<CropForm>(defaultSummaryScoreCrop);
   const [summaryStatsCrop, setSummaryStatsCrop] = useState<CropForm>(defaultSummaryStatsCrop);
   const [playersCrop, setPlayersCrop] = useState<CropForm>(defaultPlayersCrop);
+  const [myTeamSide, setMyTeamSide] = useState<TeamSide>("right");
+  const [ocrApplyMessage, setOcrApplyMessage] = useState("");
 
   useEffect(() => {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -685,6 +689,7 @@ function App() {
       setPlayersOcr({ status: "idle", result: null, error: null });
     }
 
+    setOcrApplyMessage("");
     event.target.value = "";
   };
 
@@ -747,9 +752,11 @@ function App() {
         opponentStats: { ...current.opponentStats }
       };
 
+      const isMyTeamLeft = myTeamSide === "left";
+
       if (summaryResult.score) {
-        const goalsFor = summaryResult.score.left;
-        const goalsAgainst = summaryResult.score.right;
+        const goalsFor = isMyTeamLeft ? summaryResult.score.left : summaryResult.score.right;
+        const goalsAgainst = isMyTeamLeft ? summaryResult.score.right : summaryResult.score.left;
         const goalsForNumber = parseNumber(goalsFor);
         const goalsAgainstNumber = parseNumber(goalsAgainst);
 
@@ -764,15 +771,23 @@ function App() {
       }
 
       for (const [key, value] of Object.entries(summaryResult.teamStats)) {
-        next.teamStats[key as TeamStatKey] = value;
+        const myValue = isMyTeamLeft ? value : summaryResult.opponentStats[key] ?? value;
+        next.teamStats[key as TeamStatKey] = myValue;
       }
 
       for (const [key, value] of Object.entries(summaryResult.opponentStats)) {
-        next.opponentStats[key as TeamStatKey] = value;
+        const opponentValue = isMyTeamLeft ? value : summaryResult.teamStats[key] ?? value;
+        next.opponentStats[key as TeamStatKey] = opponentValue;
+      }
+
+      if (summaryResult.teams) {
+        next.opponentName = isMyTeamLeft ? summaryResult.teams.right : summaryResult.teams.left;
       }
 
       return next;
     });
+
+    setOcrApplyMessage("Dane z OCR zostaly wstawione do formularza.");
   };
 
   const applyPlayersOcr = () => {
@@ -797,6 +812,7 @@ function App() {
         (a, b) => b.rating - a.rating || a.name.localeCompare(b.name)
       )
     );
+    setOcrApplyMessage("Wykryci zawodnicy zostali dodani do formularza.");
   };
 
   const addMatch = () => {
@@ -832,6 +848,7 @@ function App() {
     setPlayersScreenshot(null);
     setSummaryOcr({ status: "idle", result: null, error: null });
     setPlayersOcr({ status: "idle", result: null, error: null });
+    setOcrApplyMessage("");
   };
 
   const removeMatch = (id: string) => {
@@ -1047,6 +1064,28 @@ function App() {
               <span className="panel-subtle">Fundament pod OCR w kolejnym kroku.</span>
             </div>
 
+            <div className="side-selector">
+              <span>Moja druzyna na screenie jest:</span>
+              <div className="segmented-control">
+                <button
+                  className={`segmented-button ${myTeamSide === "left" ? "segmented-active" : ""}`}
+                  type="button"
+                  onClick={() => setMyTeamSide("left")}
+                >
+                  Po lewej
+                </button>
+                <button
+                  className={`segmented-button ${myTeamSide === "right" ? "segmented-active" : ""}`}
+                  type="button"
+                  onClick={() => setMyTeamSide("right")}
+                >
+                  Po prawej
+                </button>
+              </div>
+            </div>
+
+            {ocrApplyMessage ? <div className="ocr-success">{ocrApplyMessage}</div> : null}
+
             <div className="upload-grid">
               <label className="upload-box">
                 <span>Podsumowanie meczu</span>
@@ -1122,6 +1161,11 @@ function App() {
                         ? `Wykryty wynik: ${summaryOcr.result.score.left}:${summaryOcr.result.score.right}`
                         : "Nie wykryto wyniku"}
                     </strong>
+                    {summaryOcr.result.teams ? (
+                      <span className="panel-subtle">
+                        Wykryte druzyny: {summaryOcr.result.teams.left} | {summaryOcr.result.teams.right}
+                      </span>
+                    ) : null}
                     <pre>{summaryOcr.result.rawText}</pre>
                   </div>
                 ) : null}

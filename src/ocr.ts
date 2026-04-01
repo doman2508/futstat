@@ -6,6 +6,10 @@ export type SummaryOcrSuggestion = {
     left: string;
     right: string;
   };
+  teams?: {
+    left: string;
+    right: string;
+  };
   teamStats: Record<string, string>;
   opponentStats: Record<string, string>;
 };
@@ -47,8 +51,21 @@ const summaryPatterns: { key: string; aliases: string[] }[] = [
   { key: "yellowCards", aliases: ["zolte kartki"] }
 ];
 
+const commonOcrFixes: Array<[RegExp, string]> = [
+  [/pitki/gi, "pilki"],
+  [/pitka/gi, "pilka"],
+  [/popemione/gi, "popelnione"],
+  [/odisory/gi, "odbiory"],
+  [/odisior[yw]/gi, "odbiory"],
+  [/strzaty/gi, "strzaly"],
+  [/praecimety/gi, "przechwyty"],
+  [/praechwyty/gi, "przechwyty"],
+  [/xk:/gi, "czas odzyskania pilki (sek.)"],
+  [/rt/gi, ""]
+];
+
 function normalizeOcrText(text: string) {
-  return text
+  let normalized = text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[|]/g, " ")
@@ -56,12 +73,26 @@ function normalizeOcrText(text: string) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+
+  for (const [pattern, replacement] of commonOcrFixes) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  return normalized.replace(/\s+/g, " ").trim();
 }
 
 function normalizeOcrLine(line: string) {
   return normalizeOcrText(line)
     .replace(/[^\w\s:.,%-]/g, " ")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeTeamName(name: string) {
+  return name
+    .replace(/\s+/g, " ")
+    .replace(/^[^a-z0-9]+/i, "")
+    .replace(/[^a-z0-9\s.'-]+$/i, "")
     .trim();
 }
 
@@ -93,7 +124,10 @@ function cropArea(
   const sw = source.width * widthRatio;
   const sh = source.height * heightRatio;
   const scale = 2;
-  const canvas = createCanvas(Math.max(1, Math.round(sw * scale)), Math.max(1, Math.round(sh * scale)));
+  const canvas = createCanvas(
+    Math.max(1, Math.round(sw * scale)),
+    Math.max(1, Math.round(sh * scale))
+  );
   const context = canvas.getContext("2d");
 
   if (!context) {
@@ -126,11 +160,7 @@ function enhanceCanvas(canvas: HTMLCanvasElement, threshold: number) {
   return canvas.toDataURL("image/png");
 }
 
-async function recognizeWithConfig(
-  dataUrl: string,
-  mode: OcrMode,
-  whitelist?: string
-) {
+async function recognizeWithConfig(dataUrl: string, mode: OcrMode, whitelist?: string) {
   const worker = await createWorker("eng");
 
   try {
@@ -138,10 +168,6 @@ async function recognizeWithConfig(
       await worker.setParameters({
         tessedit_pageseg_mode: PSM.SINGLE_LINE,
         tessedit_char_whitelist: whitelist ?? "0123456789:-"
-      });
-    } else if (mode === "players") {
-      await worker.setParameters({
-        tessedit_pageseg_mode: PSM.SINGLE_BLOCK
       });
     } else {
       await worker.setParameters({
@@ -163,6 +189,7 @@ export async function recognizeSummaryScreenshot(
   const source = await loadImage(dataUrl);
   const scoreCrop = cropSettings?.score ?? { x: 0.26, y: 0.02, width: 0.48, height: 0.16 };
   const statsCrop = cropSettings?.stats ?? { x: 0.17, y: 0.16, width: 0.66, height: 0.58 };
+
   const scoreCanvas = cropArea(source, scoreCrop.x, scoreCrop.y, scoreCrop.width, scoreCrop.height);
   const statsCanvas = cropArea(source, statsCrop.x, statsCrop.y, statsCrop.width, statsCrop.height);
 
@@ -202,33 +229,47 @@ function extractScore(text: string) {
     .replace(/\b\d{2}[:.]\d{2}\b/g, " ");
 
   const direct = normalized.match(/(\d{1,2})\s*[:\-]\s*(\d{1,2})/);
-  if (direct) {
-    const left = direct[1];
-    const right = direct[2];
-
-    if (left && right) {
-      return { left, right };
-    }
+  if (direct?.[1] && direct?.[2]) {
+    return { left: direct[1], right: direct[2] };
   }
 
   const standaloneNumbers = normalized.match(/\b\d{1,2}\b/g) ?? [];
   if (standaloneNumbers.length >= 2) {
     return {
       left: standaloneNumbers[0] ?? "0",
-      right: standaloneNumbers[1]
+      right: standaloneNumbers[1] ?? "0"
     };
   }
 
   return undefined;
 }
 
-function extractTwoValuesFromLine(line: string, alias: string) {
-  const aliasIndex = line.indexOf(alias);
-  if (aliasIndex === -1) {
-    return null;
+function extractTeams(text: string) {
+  const line = text
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find((entry) => /\d{1,2}\s*[:\-]\s*\d{1,2}/.test(entry));
+
+  if (!line) {
+    return undefined;
   }
 
-  const numbers = line.match(/\d+(?:[.,]\d+)?/g) ?? [];
+  const match = line.match(/^(.*?)\s+\d{1,2}\s*[:\-]\s*\d{1,2}\s+(.*)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const left = normalizeTeamName(match[1] ?? "");
+  const right = normalizeTeamName(match[2] ?? "");
+
+  if (!left || !right) {
+    return undefined;
+  }
+
+  return { left, right };
+}
+
+function extractTwoValuesFromNumbers(numbers: string[]) {
   if (numbers.length < 2) {
     return null;
   }
@@ -239,7 +280,31 @@ function extractTwoValuesFromLine(line: string, alias: string) {
   };
 }
 
+function extractTwoValuesFromLine(line: string, alias: string) {
+  const aliasIndex = line.indexOf(alias);
+  if (aliasIndex === -1) {
+    return null;
+  }
+
+  return extractTwoValuesFromNumbers(line.match(/\d+(?:[.,]\d+)?/g) ?? []);
+}
+
+function extractTwoValuesFromText(text: string, alias: string) {
+  const aliasIndex = text.indexOf(alias);
+  if (aliasIndex === -1) {
+    return null;
+  }
+
+  const snippet = text.slice(
+    Math.max(0, aliasIndex - 30),
+    Math.min(text.length, aliasIndex + alias.length + 30)
+  );
+
+  return extractTwoValuesFromNumbers(snippet.match(/\d+(?:[.,]\d+)?/g) ?? []);
+}
+
 export function parseSummaryOcr(text: string): SummaryOcrSuggestion {
+  const normalizedText = normalizeOcrText(text);
   const lines = text
     .split(/\r?\n/)
     .map(normalizeOcrLine)
@@ -248,26 +313,42 @@ export function parseSummaryOcr(text: string): SummaryOcrSuggestion {
   const teamStats: Record<string, string> = {};
   const opponentStats: Record<string, string> = {};
 
-  for (const line of lines) {
-    for (const pattern of summaryPatterns) {
+  for (const pattern of summaryPatterns) {
+    let values: { left: string; right: string } | null = null;
+
+    for (const line of lines) {
       const matchedAlias = pattern.aliases.find((alias) => line.includes(alias));
       if (!matchedAlias) {
         continue;
       }
 
-      const values = extractTwoValuesFromLine(line, matchedAlias);
-      if (!values) {
-        continue;
+      values = extractTwoValuesFromLine(line, matchedAlias);
+      if (values) {
+        break;
       }
-
-      teamStats[pattern.key] = values.left;
-      opponentStats[pattern.key] = values.right;
     }
+
+    if (!values) {
+      for (const alias of pattern.aliases) {
+        values = extractTwoValuesFromText(normalizedText, alias);
+        if (values) {
+          break;
+        }
+      }
+    }
+
+    if (!values) {
+      continue;
+    }
+
+    teamStats[pattern.key] = values.left;
+    opponentStats[pattern.key] = values.right;
   }
 
   return {
     rawText: text,
     score: extractScore(text),
+    teams: extractTeams(text),
     teamStats,
     opponentStats
   };

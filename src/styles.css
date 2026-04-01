@@ -205,6 +205,30 @@ h1 {
   color: #98aac0;
 }
 
+.side-selector {
+  display: grid;
+  gap: 10px;
+}
+
+.segmented-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.segmented-button {
+  border: 1px solid rgba(171, 221, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4f7fb;
+  border-radius: 999px;
+  padding: 10px 16px;
+}
+
+.segmented-active {
+  background: linear-gradient(135deg, rgba(24, 198, 255, 0.2), rgba(0, 220, 164, 0.2));
+  border-color: rgba(24, 198, 255, 0.48);
+}
+
 .upload-preview-image {
   width: 100%;
   max-height: 260px;
@@ -262,6 +286,14 @@ h1 {
 
 .ocr-error {
   color: #ff9cb2;
+}
+
+.ocr-success {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(0, 220, 164, 0.12);
+  border: 1px solid rgba(0, 220, 164, 0.22);
+  color: #9cf7db;
 }
 
 .form-grid label {
