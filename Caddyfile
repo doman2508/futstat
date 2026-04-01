@@ -1,0 +1,11 @@
+{
+  auto_https off
+  admin off
+}
+
+:{$PORT}
+
+root * /app/dist
+encode zstd gzip
+try_files {path} /index.html
+file_server

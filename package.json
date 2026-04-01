@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "start": "node server.js"
+    "start": "caddy run --config Caddyfile --adapter caddyfile"
   },
   "dependencies": {
     "react": "^18.3.1",
